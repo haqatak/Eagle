@@ -21,12 +21,7 @@ BATCH = 4
 
 
 def get_device():
-    device = "cpu"
-    if torch.cuda.is_available():
-        device = "cuda"
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        device = "mps"
-    return device
+    return "mps"
 
 
 def find_x_at_y(pt1, pt2, y_target):
@@ -52,10 +47,7 @@ class CoordinateModel:
         self.device = device
         print(f"Using {self.device} for inference")
 
-        if device == "cpu":
-            self.detector_model = YOLO("eagle/models/weights/detector_medium.onnx", task="detect", verbose=False)  # by default uses the medium model for cpu
-        else:
-            self.detector_model = YOLO("eagle/models/weights/detector_large_hd.pt").to(device)
+        self.detector_model = YOLO("eagle/models/weights/detector_large_hd.pt").to(device)
         self.keypoint_model = KeypointModel(57).to(device)
         self.keypoint_model.load_state_dict(torch.load("eagle/models/weights/keypoints_main.pth"))
         self.keypoint_model.eval()

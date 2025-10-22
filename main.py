@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime
 import os
 import re
 import threading
@@ -16,8 +17,6 @@ from eagle.processor import RealTimeProcessor
 
 if torch.backends.mps.is_available():
     device = torch.device("mps")
-else:
-    device = torch.device("cpu")
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -104,10 +103,10 @@ def metadata_listener(hls_url: str, metadata_queue: queue.Queue):
 
                     if match:
                         time_str = match.group(1).decode('utf-8', errors='ignore')
-                        stream_timestamp = packet.pts * packet.time_base
-
-                        parsed_data = {'type': 'time_update', 'value': time_str}
-                        metadata_queue.put({'timestamp': stream_timestamp, 'data': parsed_data})
+                        print(time_str)
+                        # stream_timestamp = packet.pts * packet.time_base
+                        # parsed_data = {'type': 'time_update', 'value': time_str}
+                        metadata_queue.put(time_str)
 
     except Exception as e:
         print(f"Error in metadata listener: {e}")
@@ -141,24 +140,32 @@ def main_realtime():
     current_metadata = "No active metadata"
     all_frames = []
 
+    # current date is not encoded in given id3 metadata stream todo
+    current_date = datetime.now().strftime("%Y-%m-%d")
+
+    i = 0
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
 
-        try:
-            metadata_item = metadata_queue.get_nowait()
-            current_metadata = f"{metadata_item}"
-        except queue.Empty:
-            pass
 
         frame_data = model.process_single_frame(frame, fps=native_fps)
-
         if frame_data:
+            if i % native_fps == 0:
+                try:
+                    current_metadata = metadata_queue.get_nowait()
+                except queue.Empty:
+                    pass
+
+            i += 1
+
+            frame_data["TimeStamp"] = f"{current_date}T{current_metadata}"
             processor.update(frame, frame_data)
             team_mapping = processor.get_team_mapping()
 
             frame_key = f"frame_{int(cap.get(cv2.CAP_PROP_POS_FRAMES)):05d}"
+            print(frame_key)
             all_frames_data[frame_key] = frame_data
 
             annotated_frame = annotate_frame(frame.copy(), frame_data, team_mapping, current_metadata)
@@ -186,6 +193,7 @@ def main_realtime():
     json_filename = os.path.join(args.output_dir, "all_frames_data.json")
     with open(json_filename, 'w') as f:
         dump(all_frames_data, f, cls=NumpyEncoder, indent=4)
+
     cv2.destroyAllWindows()
 
 if __name__ == "__main__":
