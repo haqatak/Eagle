@@ -12,6 +12,7 @@ from argparse import ArgumentParser
 import json
 import queue
 import torch
+import sys
 
 from eagle.models.coordinate_model import CoordinateModel
 from eagle.processor import RealTimeProcessor
@@ -501,6 +502,26 @@ def main_realtime():
     print("Shutting down...")
     end_time = time.time()
     stop_event.set() # Signal all threads
+
+    print("\n" + "="*50)
+    print("Loaded LOCAL Python files from your project:")
+
+    # Get the project's root directory
+    project_root = os.path.dirname(os.path.abspath(__file__))
+
+    loaded_local_files = []
+    for mod_name, mod in sys.modules.items():
+        # Get the path to the loaded module's file
+        mod_file = getattr(mod, '__file__', None)
+
+        # Check if it's a file and if it's inside your project folder
+        if mod_file and mod_file.startswith(project_root):
+            # Get the relative path
+            rel_path = os.path.relpath(mod_file, project_root)
+            loaded_local_files.append(rel_path)
+
+    print(sorted(loaded_local_files))
+    print("="*50 + "\n")
 
     # Wait for threads to finish
     reader_thread.join(timeout=2)
