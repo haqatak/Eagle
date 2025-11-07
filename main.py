@@ -424,7 +424,6 @@ def main_realtime():
     # --- State ---
     current_second_buffer = []
     current_metadata = "Waiting for metadata..."
-    current_date = datetime.now().strftime("%Y-%m-%d")
     agg_frame_count = 0
     worker_has_produced_first_frame = False
 
@@ -442,7 +441,7 @@ def main_realtime():
                     print(f"Main: Aggregating {len(current_second_buffer)} frames...")
                     aggregated_data_raw = aggregate_frame_data(current_second_buffer)
 
-                    timestamp_str = f"{current_date}T{current_metadata}"
+                    timestamp_str = f"{current_metadata}"
                     formatted_data = format_aggregated_data(aggregated_data_raw, timestamp_str)
 
                     frame_key = f"frame_{agg_frame_count:05d}"
@@ -516,7 +515,7 @@ def main_realtime():
         aggregated_data_raw = aggregate_frame_data(current_second_buffer)
 
         # 2. Format
-        timestamp_str = f"{current_date}T{current_metadata}"
+        timestamp_str = f"{current_metadata}"
         formatted_data = format_aggregated_data(aggregated_data_raw, timestamp_str)
 
         # 3. Save
