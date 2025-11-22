@@ -710,6 +710,11 @@ def main_realtime():
 
             # --- Annotate and Display ---
             status_text = f"Frame: {frame_index} | Time: {current_metadata}"
+
+            if args.headless:
+                # Print progress to stdout so it can be monitored by the web interface
+                print(f"Progress: {status_text}")
+
             annotated_frame = annotate_frame(original_frame,
                                              raw_frame_data,
                                              team_mapping,

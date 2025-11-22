@@ -281,6 +281,61 @@ async def get_voronoi(task_id: str):
 
     return FileResponse(img_path, media_type='image/png')
 
+@app.get("/result/{task_id}", response_class=HTMLResponse)
+async def result_page(task_id: str):
+    if task_id not in tasks:
+        return HTMLResponse("<h1>Task not found</h1>", status_code=404)
+
+    task = tasks[task_id]
+    if task["status"] != "completed":
+        return HTMLResponse(f"<h1>Task is {task['status']}</h1><p>Please wait...</p>")
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Eagle Results</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; max-width: 1000px; margin: 0 auto; padding: 20px; }}
+            .viz-container {{ display: flex; flex-wrap: wrap; gap: 20px; }}
+            .viz-item {{ border: 1px solid #ccc; padding: 10px; text-align: center; }}
+            img {{ max-width: 400px; height: auto; }}
+            video {{ max-width: 100%; }}
+        </style>
+    </head>
+    <body>
+        <h1>Processing Results</h1>
+        <p><a href="/">Back to Home</a></p>
+
+        <h2>Annotated Video</h2>
+        <video controls>
+            <source src="/results/{task_id}/video" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+
+        <h2>Visualizations</h2>
+        <div class="viz-container">
+            <div class="viz-item">
+                <h3>Voronoi Diagram</h3>
+                <img src="/results/{task_id}/voronoi" alt="Voronoi Diagram">
+            </div>
+            <div class="viz-item">
+                <h3>Pass Plot</h3>
+                <img src="/results/{task_id}/pass" alt="Pass Plot">
+            </div>
+            <div class="viz-item">
+                <h3>Player Trajectory</h3>
+                <img src="/results/{task_id}/trajectory" alt="Player Trajectory">
+            </div>
+        </div>
+
+        <h2>Data</h2>
+        <p><a href="/results/{task_id}/json" target="_blank">Download JSON Data</a></p>
+    </body>
+    </html>
+    """
+    return html
+
 @app.get("/results/{task_id}/pass")
 async def get_pass(task_id: str):
     if task_id not in tasks or tasks[task_id]["status"] != "completed":
