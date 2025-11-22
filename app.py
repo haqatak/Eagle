@@ -79,19 +79,48 @@ def start_processing(task_id: str, video_path: str):
     except Exception as e:
         tasks[task_id] = {"status": "error", "message": str(e)}
 
+# Restore history on startup
+def load_history():
+    if not os.path.exists(OUTPUT_DIR):
+        return
+
+    for task_id in os.listdir(OUTPUT_DIR):
+        task_dir = os.path.join(OUTPUT_DIR, task_id)
+        if os.path.isdir(task_dir):
+            # Check if successful
+            if os.path.exists(os.path.join(task_dir, "annotated_demo_video.mp4")):
+                tasks[task_id] = {"status": "completed", "output_dir": task_dir}
+            elif os.path.exists(os.path.join(task_dir, "aggregated_per_second_data.json")):
+                 # Partially done or failed
+                 tasks[task_id] = {"status": "failed", "output_dir": task_dir, "message": "Interrupted or failed"}
+            else:
+                 # Likely empty or just started
+                 pass
+
+load_history()
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
-    html_content = """
+    # Generate history HTML
+    history_html = ""
+    completed_tasks = {k: v for k, v in tasks.items() if v["status"] == "completed"}
+    if completed_tasks:
+        history_html += "<h2>Previous Runs</h2><ul>"
+        for task_id, task in completed_tasks.items():
+            history_html += f'<li><a href="/result/{task_id}">{task_id}</a> (Completed)</li>'
+        history_html += "</ul>"
+
+    html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <title>Eagle Football Tracking</title>
         <style>
-            body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
-            .container { border: 1px solid #ccc; padding: 20px; border-radius: 5px; }
-            .status { margin-top: 20px; padding: 10px; background-color: #f0f0f0; }
-            .error { color: red; }
-            .success { color: green; }
+            body {{ font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }}
+            .container {{ border: 1px solid #ccc; padding: 20px; border-radius: 5px; }}
+            .status {{ margin-top: 20px; padding: 10px; background-color: #f0f0f0; }}
+            .error {{ color: red; }}
+            .success {{ color: green; }}
         </style>
     </head>
     <body>
@@ -110,17 +139,15 @@ async def read_root():
             </form>
         </div>
 
+        {history_html}
+
         <div id="status-container" class="status" style="display:none;">
             <p>Status: <span id="status-text">Waiting...</span></p>
+            <p id="progress-container" style="display:none;">Progress: <span id="progress-text"></span></p>
+            <p><a id="live-logs-link" href="#" target="_blank" style="display:none;">View Live Logs</a></p>
             <div id="results-links" style="display:none;">
-                <p>Processing Complete!</p>
-                <ul>
-                    <li><a id="json-link" href="#" target="_blank">Download JSON Data</a></li>
-                    <li><a id="video-link" href="#" target="_blank">Download Annotated Video</a></li>
-                    <li><a id="voronoi-link" href="#" target="_blank">View Voronoi Diagram</a></li>
-                    <li><a id="pass-link" href="#" target="_blank">View Pass Plot</a></li>
-                    <li><a id="traj-link" href="#" target="_blank">View Ball Trajectory</a></li>
-                </ul>
+                <p class="success">Processing Complete!</p>
+                <p><a id="result-page-link" href="#" target="_blank" style="font-weight:bold; font-size:1.2em;">View Full Results Page</a></p>
             </div>
         </div>
 
@@ -129,66 +156,62 @@ async def read_root():
             const urlForm = document.querySelector('form[action="/process_url"]');
             const statusContainer = document.getElementById('status-container');
             const statusText = document.getElementById('status-text');
+            const progressContainer = document.getElementById('progress-container');
+            const progressText = document.getElementById('progress-text');
             const resultsLinks = document.getElementById('results-links');
+            const liveLogsLink = document.getElementById('live-logs-link');
 
-            async function handleSubmit(e, action) {
+            async function handleSubmit(e, action) {{
                 e.preventDefault();
                 const formData = new FormData(e.target);
-                let body;
-                let headers = {};
 
-                if (action === '/process_url') {
-                    // Handle URL form specially if needed, but currently it's simpler
-                    // Actually, FastAPI expects query param or body. Let's adjust.
-                    // My app.py says: async def process_url(url: str) -> query param
-                    const url = formData.get('url');
-                    statusContainer.style.display = 'block';
-                    statusText.innerText = "Starting...";
-
-                    const response = await fetch(`/process_url?url=${encodeURIComponent(url)}`, {
-                        method: 'POST'
-                    });
-                    const data = await response.json();
-                    pollStatus(data.status_url, data.task_id);
-                    return;
-                }
+                let url;
+                let response;
 
                 statusContainer.style.display = 'block';
-                statusText.innerText = "Uploading...";
 
-                const response = await fetch(action, {
-                    method: 'POST',
-                    body: formData
-                });
+                if (action === '/process_url') {{
+                    const inputUrl = formData.get('url');
+                    statusText.innerText = "Starting...";
+                    url = `/process_url?url=${{encodeURIComponent(inputUrl)}}`;
+                    response = await fetch(url, {{ method: 'POST' }});
+                }} else {{
+                    statusText.innerText = "Uploading...";
+                    url = action;
+                    response = await fetch(url, {{ method: 'POST', body: formData }});
+                }}
 
                 const data = await response.json();
+                liveLogsLink.href = `/logs/${{data.task_id}}`;
+                liveLogsLink.style.display = "inline";
                 pollStatus(data.status_url, data.task_id);
-            }
+            }}
 
-            async function pollStatus(url, taskId) {
-                const interval = setInterval(async () => {
-                    try {
+            async function pollStatus(url, taskId) {{
+                const interval = setInterval(async () => {{
+                    try {{
                         const response = await fetch(url);
                         const data = await response.json();
                         statusText.innerText = data.status;
 
-                        if (data.status === 'completed') {
+                        if (data.progress) {{
+                            progressContainer.style.display = 'block';
+                            progressText.innerText = data.progress;
+                        }}
+
+                        if (data.status === 'completed') {{
                             clearInterval(interval);
                             resultsLinks.style.display = 'block';
-                            document.getElementById('json-link').href = `/results/${taskId}/json`;
-                            document.getElementById('video-link').href = `/results/${taskId}/video`;
-                            document.getElementById('voronoi-link').href = `/results/${taskId}/voronoi`;
-                            document.getElementById('pass-link').href = `/results/${taskId}/pass`;
-                            document.getElementById('traj-link').href = `/results/${taskId}/trajectory`;
-                        } else if (data.status === 'failed' || data.status === 'error') {
+                            document.getElementById('result-page-link').href = `/result/${{taskId}}`;
+                        }} else if (data.status === 'failed' || data.status === 'error') {{
                             clearInterval(interval);
                             statusText.innerText = "Failed: " + (data.message || data.error);
-                        }
-                    } catch (e) {
+                        }}
+                    }} catch (e) {{
                         console.error(e);
-                    }
-                }, 2000);
-            }
+                    }}
+                }}, 1000);
+            }}
 
             form.addEventListener('submit', (e) => handleSubmit(e, '/process'));
             urlForm.addEventListener('submit', (e) => handleSubmit(e, '/process_url'));
