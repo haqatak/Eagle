@@ -300,13 +300,14 @@ def aggregate_frame_data(buffer):
 
     return avg_data
 
-def format_aggregated_data(agg_data, timestamp_str):
+def format_aggregated_data(agg_data, timestamp_str, team_mapping):
     """
     Formats the raw aggregated data into the user's specified JSON structure.
 
     Args:
         agg_data (dict): The averaged data from `aggregate_frame_data`.
         timestamp_str (str): The timestamp for this aggregation (e.g., "YYYY-MM-DDTHH:MM:SS:FF").
+        team_mapping (dict): A dict mapping player_id to team_id (0 or 1).
 
     Returns:
         dict: A dictionary formatted to the user's specific JSON schema.
@@ -331,11 +332,16 @@ def format_aggregated_data(agg_data, timestamp_str):
         for entity_id, data in agg_data.get("Coordinates", {}).get(entity_type, {}).items():
             if "Bottom_center" in data:
                 coords = [round(c, 2) for c in data["Bottom_center"]]
-                coordinates_list.append({
+                item = {
                     "ID": entity_id,
                     "Coordinates": coords,
                     "Type": entity_type
-                })
+                }
+                if entity_type == "Player":
+                    team_id = team_mapping.get(entity_id)
+                    if team_id is not None:
+                        item["Team"] = team_id
+                coordinates_list.append(item)
 
     # Process Ball(s) - average all detected balls into a single "Ball" entry
     ball_sum = [0.0, 0.0]
@@ -669,7 +675,7 @@ def main_realtime():
 
                     # Bug fix: Add current_date to the timestamp
                     timestamp_str = f"{current_date}T{current_metadata}"
-                    formatted_data = format_aggregated_data(aggregated_data_raw, timestamp_str)
+                    formatted_data = format_aggregated_data(aggregated_data_raw, timestamp_str, team_mapping)
 
                     frame_key = f"frame_{agg_frame_count:05d}"
                     all_aggregated_data_dict[frame_key] = formatted_data
@@ -752,7 +758,7 @@ def main_realtime():
 
         # Bug fix: Add current_date to the timestamp
         timestamp_str = f"{current_date}T{current_metadata}"
-        formatted_data = format_aggregated_data(aggregated_data_raw, timestamp_str)
+        formatted_data = format_aggregated_data(aggregated_data_raw, timestamp_str, team_mapping)
 
         frame_key = f"frame_{agg_frame_count:05d}"
         all_aggregated_data_dict[frame_key] = formatted_data

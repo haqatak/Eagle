@@ -9,3 +9,6 @@ ultralytics
 tqdm
 albumentations
 boxmot
+mplsoccer
+pandas
+matplotlib
