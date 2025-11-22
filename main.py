@@ -370,7 +370,7 @@ def format_aggregated_data(agg_data, timestamp_str):
 
 # --- Thread Target Functions ---
 
-def metadata_listener(hls_url: str, metadata_queue: queue.Queue, stop_event: threading.Event):
+def metadata_listener(hls_url: str, metadata_queue: queue.Queue, stop_event: threading.Event, is_file: bool = False):
     """
     Thread target: Listens for ID3 metadata tags in the HLS stream.
 
@@ -378,7 +378,25 @@ def metadata_listener(hls_url: str, metadata_queue: queue.Queue, stop_event: thr
     - De-bounces timestamps to only send *new* timestamps.
     - Signals the main `stop_event` if the stream ends.
     """
-    print("Metadata listener started. Waiting for stream...")
+    print("Metadata listener started.")
+
+    if is_file:
+        print("Metadata listener: File mode. Generating synthetic metadata.")
+        start_time = datetime.now()
+        last_second = -1
+        while not stop_event.is_set():
+             # In file mode, we just generate a timestamp every second
+             elapsed = (datetime.now() - start_time).total_seconds()
+             current_second = int(elapsed)
+             if current_second > last_second:
+                 time_str = datetime.now().strftime("%H:%M:%S:00")
+                 metadata_queue.put(time_str)
+                 last_second = current_second
+             time.sleep(0.1)
+        print("Metadata listener: Stopped.")
+        return
+
+    print("Metadata listener: Waiting for stream...")
     last_sent_time_str = None
     stream_was_live = False
 
@@ -541,6 +559,7 @@ def main_realtime():
     parser = ArgumentParser()
     parser.add_argument("--video_path", type=str, default="0", help="Path to the video file or 'HLS stream")
     parser.add_argument("--output_dir", type=str, default="output", help="Directory to save output files.")
+    parser.add_argument("--headless", action="store_true", help="Run in headless mode (no GUI)")
     args = parser.parse_args()
 
     # --- 1. Setup Queues and Stop Event ---
@@ -553,26 +572,37 @@ def main_realtime():
     print(f"Main: Waiting for video stream at {args.video_path}...")
     cap = cv2.VideoCapture(args.video_path)
 
+    # Check if input is a local file
+    is_file = os.path.isfile(args.video_path)
+
     while not cap.isOpened() and not stop_event.is_set():
+        if is_file:
+             # If it's a file and we can't open it, it's an error.
+             print(f"Main: Could not open file {args.video_path}")
+             stop_event.set()
+             return
+
         time.sleep(0.5)
         cap.release()
         cap = cv2.VideoCapture(args.video_path)
 
-        # Show a dummy window to allow quitting with 'q'
-        wait_img = np.zeros(WAITING_WINDOW_SIZE, dtype=np.uint8)
-        cv2.putText(wait_img, "Waiting for stream...", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-        cv2.imshow("Waiting for stream...", wait_img)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            print("Main: Quit during wait.")
-            stop_event.set()
-            break
+        if not args.headless:
+            # Show a dummy window to allow quitting with 'q'
+            wait_img = np.zeros(WAITING_WINDOW_SIZE, dtype=np.uint8)
+            cv2.putText(wait_img, "Waiting for stream...", (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.imshow("Waiting for stream...", wait_img)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                print("Main: Quit during wait.")
+                stop_event.set()
+                break
 
     if not cap.isOpened():
         print("Main: Could not open stream. Exiting.")
         stop_event.set()
         return
 
-    cv2.destroyWindow("Waiting for stream...")
+    if not args.headless:
+        cv2.destroyWindow("Waiting for stream...")
     print("Main: Video stream found! Starting processing.")
 
     native_fps = cap.get(cv2.CAP_PROP_FPS)
@@ -594,7 +624,7 @@ def main_realtime():
 
     # --- 4. Start All Threads ---
     listener_thread = threading.Thread(target=metadata_listener,
-                                       args=(args.video_path, metadata_queue, stop_event),
+                                       args=(args.video_path, metadata_queue, stop_event, is_file),
                                        daemon=True)
     reader_thread = threading.Thread(target=frame_reader,
                                      args=(cap, job_queue, native_fps, stop_event))
@@ -681,17 +711,20 @@ def main_realtime():
 
             minimap_canvas = draw_minimap(minimap_canvas, dst_points, raw_frame_data, team_mapping)
 
-            cv2.imshow("Minimap", minimap_canvas)
-            cv2.imshow("Eagle Real-Time Tracking", annotated_frame)
+            if not args.headless:
+                cv2.imshow("Minimap", minimap_canvas)
+                cv2.imshow("Eagle Real-Time Tracking", annotated_frame)
+
             all_frames_for_video.append(annotated_frame)
 
             result_queue.task_done()
 
             # --- Check for Quit Key ---
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                print("Main: 'q' key pressed. Shutting down.")
-                stop_event.set()
-                break
+            if not args.headless:
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    print("Main: 'q' key pressed. Shutting down.")
+                    stop_event.set()
+                    break
 
         except queue.Empty:
             # No new frame is ready from the worker.
@@ -756,7 +789,8 @@ def main_realtime():
     if out_video:
         out_video.release()
 
-    cv2.destroyAllWindows()
+    if not args.headless:
+        cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main_realtime()

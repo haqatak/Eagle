@@ -166,4 +166,11 @@ cython_debug/
 *.pth
 *.mp4
 weights/
-examples/output/
+examples/output/weights.zip
+eagle/models/weights/
+eagle/models/weights/
+osnet_x0_25_msmt17.pt
+weights.zip
+output/
+uploads/
+dummy_video.mp4
