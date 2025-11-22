@@ -6,6 +6,14 @@ if ! command -v tmux &> /dev/null; then
     exit 1
 fi
 
+# Install dependencies
+echo "Installing dependencies..."
+if command -v uv &> /dev/null; then
+    uv pip install -r requirements.txt
+else
+    pip install -r requirements.txt
+fi
+
 # Ensure weights are present
 echo "Checking weights..."
 mkdir -p eagle/models/weights
