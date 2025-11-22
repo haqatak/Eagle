@@ -21,7 +21,11 @@ BATCH = 4
 
 
 def get_device():
-    return "mps"
+    if torch.cuda.is_available():
+        return "cuda"
+    elif torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
 
 
 def find_x_at_y(pt1, pt2, y_target):
