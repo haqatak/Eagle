@@ -6,6 +6,30 @@ if ! command -v tmux &> /dev/null; then
     exit 1
 fi
 
+# Activate Virtual Environment
+if [ -z "$VIRTUAL_ENV" ]; then
+    if [ -f ".venv/bin/activate" ]; then
+        echo "Activating .venv..."
+        source .venv/bin/activate
+    elif [ -f "venv/bin/activate" ]; then
+        echo "Activating venv..."
+        source venv/bin/activate
+    else
+        echo "No virtual environment found."
+        if command -v uv &> /dev/null; then
+            echo "Creating .venv with uv..."
+            uv venv
+            source .venv/bin/activate
+        else
+            echo "Creating .venv with python..."
+            python3 -m venv .venv
+            source .venv/bin/activate
+        fi
+    fi
+else
+    echo "Already in virtual environment: $VIRTUAL_ENV"
+fi
+
 # Install dependencies
 echo "Installing dependencies..."
 if command -v uv &> /dev/null; then
@@ -54,10 +78,21 @@ tmux new-session -d -s $SESSION_NAME -n "Web Server"
 
 # Start the web server in the first window
 # Removed --reload to prevent restarts when output files change
+# We must also activate the environment inside the tmux session
+if [ -f ".venv/bin/activate" ]; then
+    tmux send-keys -t $SESSION_NAME:0 "source .venv/bin/activate" C-m
+elif [ -f "venv/bin/activate" ]; then
+    tmux send-keys -t $SESSION_NAME:0 "source venv/bin/activate" C-m
+fi
 tmux send-keys -t $SESSION_NAME:0 "uvicorn app:app --host 0.0.0.0 --port 8000" C-m
 
 # Create a new window for potential ffmpeg streaming or other tasks
 tmux new-window -t $SESSION_NAME:1 -n "Terminal"
+if [ -f ".venv/bin/activate" ]; then
+    tmux send-keys -t $SESSION_NAME:1 "source .venv/bin/activate" C-m
+elif [ -f "venv/bin/activate" ]; then
+    tmux send-keys -t $SESSION_NAME:1 "source venv/bin/activate" C-m
+fi
 tmux send-keys -t $SESSION_NAME:1 "echo 'Use this terminal for manual tasks'" C-m
 
 echo "Started tmux session '$SESSION_NAME'."
