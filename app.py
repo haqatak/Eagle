@@ -9,6 +9,7 @@ from typing import Optional
 import uuid
 import time
 from pathlib import Path
+import viz
 
 app = FastAPI()
 
@@ -109,10 +110,88 @@ async def read_root():
             </form>
         </div>
 
-        <div id="status-container"></div>
+        <div id="status-container" class="status" style="display:none;">
+            <p>Status: <span id="status-text">Waiting...</span></p>
+            <div id="results-links" style="display:none;">
+                <p>Processing Complete!</p>
+                <ul>
+                    <li><a id="json-link" href="#" target="_blank">Download JSON Data</a></li>
+                    <li><a id="video-link" href="#" target="_blank">Download Annotated Video</a></li>
+                    <li><a id="voronoi-link" href="#" target="_blank">View Voronoi Diagram</a></li>
+                    <li><a id="pass-link" href="#" target="_blank">View Pass Plot</a></li>
+                    <li><a id="traj-link" href="#" target="_blank">View Ball Trajectory</a></li>
+                </ul>
+            </div>
+        </div>
 
         <script>
-            // Simple polling script could go here
+            const form = document.querySelector('form[action="/process"]');
+            const urlForm = document.querySelector('form[action="/process_url"]');
+            const statusContainer = document.getElementById('status-container');
+            const statusText = document.getElementById('status-text');
+            const resultsLinks = document.getElementById('results-links');
+
+            async function handleSubmit(e, action) {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                let body;
+                let headers = {};
+
+                if (action === '/process_url') {
+                    // Handle URL form specially if needed, but currently it's simpler
+                    // Actually, FastAPI expects query param or body. Let's adjust.
+                    // My app.py says: async def process_url(url: str) -> query param
+                    const url = formData.get('url');
+                    statusContainer.style.display = 'block';
+                    statusText.innerText = "Starting...";
+
+                    const response = await fetch(`/process_url?url=${encodeURIComponent(url)}`, {
+                        method: 'POST'
+                    });
+                    const data = await response.json();
+                    pollStatus(data.status_url, data.task_id);
+                    return;
+                }
+
+                statusContainer.style.display = 'block';
+                statusText.innerText = "Uploading...";
+
+                const response = await fetch(action, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                pollStatus(data.status_url, data.task_id);
+            }
+
+            async function pollStatus(url, taskId) {
+                const interval = setInterval(async () => {
+                    try {
+                        const response = await fetch(url);
+                        const data = await response.json();
+                        statusText.innerText = data.status;
+
+                        if (data.status === 'completed') {
+                            clearInterval(interval);
+                            resultsLinks.style.display = 'block';
+                            document.getElementById('json-link').href = `/results/${taskId}/json`;
+                            document.getElementById('video-link').href = `/results/${taskId}/video`;
+                            document.getElementById('voronoi-link').href = `/results/${taskId}/voronoi`;
+                            document.getElementById('pass-link').href = `/results/${taskId}/pass`;
+                            document.getElementById('traj-link').href = `/results/${taskId}/trajectory`;
+                        } else if (data.status === 'failed' || data.status === 'error') {
+                            clearInterval(interval);
+                            statusText.innerText = "Failed: " + (data.message || data.error);
+                        }
+                    } catch (e) {
+                        console.error(e);
+                    }
+                }, 2000);
+            }
+
+            form.addEventListener('submit', (e) => handleSubmit(e, '/process'));
+            urlForm.addEventListener('submit', (e) => handleSubmit(e, '/process_url'));
         </script>
     </body>
     </html>
@@ -186,3 +265,48 @@ async def get_logs(task_id: str):
             logs["stderr"] = f.read()
 
     return logs
+
+@app.get("/results/{task_id}/voronoi")
+async def get_voronoi(task_id: str):
+    if task_id not in tasks or tasks[task_id]["status"] != "completed":
+         raise HTTPException(status_code=404, detail="Result not ready or failed")
+
+    output_dir = tasks[task_id]["output_dir"]
+    json_path = os.path.join(output_dir, "aggregated_per_second_data.json")
+    img_path = os.path.join(output_dir, "voronoi.png")
+
+    if not os.path.exists(img_path):
+        if not viz.generate_voronoi(json_path, img_path):
+             raise HTTPException(status_code=500, detail="Failed to generate visualization")
+
+    return FileResponse(img_path, media_type='image/png')
+
+@app.get("/results/{task_id}/pass")
+async def get_pass(task_id: str):
+    if task_id not in tasks or tasks[task_id]["status"] != "completed":
+         raise HTTPException(status_code=404, detail="Result not ready or failed")
+
+    output_dir = tasks[task_id]["output_dir"]
+    json_path = os.path.join(output_dir, "aggregated_per_second_data.json")
+    img_path = os.path.join(output_dir, "pass.png")
+
+    if not os.path.exists(img_path):
+        if not viz.generate_pass_plot(json_path, img_path):
+             raise HTTPException(status_code=500, detail="Failed to generate visualization")
+
+    return FileResponse(img_path, media_type='image/png')
+
+@app.get("/results/{task_id}/trajectory")
+async def get_trajectory(task_id: str):
+    if task_id not in tasks or tasks[task_id]["status"] != "completed":
+         raise HTTPException(status_code=404, detail="Result not ready or failed")
+
+    output_dir = tasks[task_id]["output_dir"]
+    json_path = os.path.join(output_dir, "aggregated_per_second_data.json")
+    img_path = os.path.join(output_dir, "trajectory.png")
+
+    if not os.path.exists(img_path):
+        if not viz.generate_trajectory(json_path, img_path):
+             raise HTTPException(status_code=500, detail="Failed to generate visualization")
+
+    return FileResponse(img_path, media_type='image/png')
