@@ -4,100 +4,118 @@ Eagle converts football broadcast data from television feeds to tracking data us
 
 Unlike other solutions, Eagle is designed to work **directly on broadcast data** and does not require special scouting feeds or angles. It can read and process clips directly from matches.
 
-**Note on this Fork:** This repository has been heavily modified to run as a **real-time, multi-threaded inference pipeline**. It consumes a live HLS stream with timed ID3 metadata, performs object tracking, and generates both a live annotated video (with minimap) and a per-second aggregated JSON file. The instructions below are specific to this real-time HLS demo.
+**Note on this Fork:** This repository has been heavily modified to run as a **real-time, multi-threaded inference pipeline**. It consumes a live HLS stream with timed ID3 metadata, performs object tracking, and generates both a live annotated video (with minimap) and a per-second aggregated JSON file.
+
+It now also supports **local file processing** and a **Web Interface** for easy deployment.
 
 For more information on the original algorithm, refer to the [documentation](docs/algorithm.md).
 
 ---
 
-## Real-Time HLS Tracking and Aggregation Demo
+## Installation (Linux / macOS)
 
-This section details how to run the `main.py` script for live HLS processing.
+### Prerequisites
 
-### Features
+1.  **Python 3.10+**: Ensure Python is installed.
+2.  **FFmpeg**: Required for video processing.
+    *   **Linux (Ubuntu/Debian):** `sudo apt install ffmpeg`
+    *   **macOS:** `brew install ffmpeg`
+3.  **Tmux**: Required for the deployment script `start.sh`.
+    *   **Linux:** `sudo apt install tmux`
+    *   **macOS:** `brew install tmux`
 
-* **Multi-Threaded Pipeline:** Uses four distinct threads (Reader, Worker, Metadata Listener, Display) to ensure the high-FPS stream (25 FPS) is read correctly while the slower ML model (e.g., 8-10 FPS) processes frames without blocking.
-* **Accurate Live Annotations:** The video display is locked to the model's processing speed, ensuring that all annotations (player ellipses, ball, field lines) are **perfectly synchronized** with the frame they are drawn on.
-* **Live Minimap:** Generates a real-time, top-down tactical minimap by calculating the perspective transform (homography) from the field keypoints.
-* **Metadata-Driven Aggregation:** Ingests timed ID3 metadata from the HLS stream to trigger a data aggregation event *exactly* once per second.
-* **Per-Second Averaging:** Averages all player and ball coordinates detected within a one-second window and saves them to a JSON file.
-* **Custom JSON Formatting:** Outputs aggregated data into a specific JSON schema, including timestamps, field boundaries, and coordinate lists.
-* **Robust Stream Handling:** Automatically waits for the live stream to start and gracefully shuts down all threads when the stream ends or 'q' is pressed.
+### Setup
 
-### How It Works: The 4-Thread Architecture
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/your-username/eagle.git
+    cd eagle
+    ```
 
-This project cannot consume a standard VOD (Video-on-Demand) file because it relies on metadata arriving in real-time. The required 3-terminal setup creates a "VOD-to-Live" pipeline.
+2.  Install Python dependencies:
+    Using `pip`:
+    ```bash
+    pip install -r requirements.txt
+    ```
+    Or using `uv`:
+    ```bash
+    uv pip install -r requirements.txt
+    ```
 
-Inside the Python script (`main.py`), a 4-thread architecture manages the data flow:
+3.  **Important:** The `start.sh` script will attempt to download the required model weights automatically. However, if you wish to download them manually, ensure they are placed in `eagle/models/weights/`.
 
-1.  **Thread 1: Reader (`frame_reader`)**
-    * Reads frames from the HLS stream at 25 FPS.
-    * Puts the *most recent* frame into the `job_queue` (a buffer of size 1).
+---
 
-2.  **Thread 2: Metadata Listener (`metadata_listener`)**
-    * Listens to the HLS stream *only* for ID3 metadata tags.
-    * Puts a unique timestamp string (e.g., `18:54:20:00`) into the `metadata_queue` once per second.
+## Quick Start: Web Interface
 
-3.  **Thread 3: Worker (`process_worker`)**
-    * This is the **bottleneck**. It pulls the latest frame from the `job_queue` as fast as it can (e.g., 8-10 FPS).
-    * Runs the heavy `model.process_single_frame()`.
-    * Puts the *original frame + its processed data* into the `result_queue`.
+The easiest way to use Eagle is via the provided Web Interface, which handles video uploading, processing, and result retrieval.
 
-4.  **Thread 4: Main/Display (`main_realtime`)**
-    * Waits and pulls finished, processed frames from the `result_queue` (at 8-10 FPS).
-    * Displays the annotated frame (resulting in a low-FPS, but 100% accurate, video).
-    * Listens to the `metadata_queue` to trigger data aggregation.
+1.  Run the startup script:
+    ```bash
+    ./start.sh
+    ```
+    This script will:
+    *   Check for necessary weights (and download them if missing).
+    *   Start a `tmux` session named `eagle`.
+    *   Launch the FastAPI web server inside the session.
 
-### Requirements
+2.  Open your browser and navigate to:
+    ```
+    http://localhost:8000
+    ```
 
-* Python 3.10+
-* All libraries from `requirements.txt` (including `torch`, `opencv-python`, `av`, `numpy`, `scipy`).
-* **FFmpeg:** This must be installed on your system and available in your PATH.
-* **An HLS VOD Stream Source:** This script is designed to run against the VOD stream generated by the [Org-id3 project](https://github.com/JacobJEdwards/Org-id3).
+3.  **Use the Interface:**
+    *   **Upload Video:** Select a local video file (e.g., `.mp4`) and click "Process Video".
+    *   **Stream URL:** Enter an HLS stream URL (e.g., `.m3u8`) and click "Process Stream".
+    *   The system will process the video in the background. You can check the status and download the results (JSON Data and Annotated Video) once complete.
 
-### How to Run
+4.  **Stop the Server:**
+    To stop the session, you can attach to tmux and kill it, or simply run:
+    ```bash
+    tmux kill-session -t eagle
+    ```
 
-This project **requires three separate terminals** to run correctly, started in a specific order to prevent stream mismatches.
+---
 
-#### Step 1: Terminal 1 - Host the VOD Stream
+## Advanced Usage: Command Line
 
-First, you must serve the source HLS VOD files from your `Org-id3` project.
+You can also run the processing script manually without the web interface.
 
-1.  Navigate to the directory where your VOD files (`.m3u8`, `.ts`) are located.
+### Processing a Local File
+
+To process a local video file without a GUI (headless mode):
+
+```bash
+python main.py --video_path "path/to/video.mp4" --output_dir "output" --headless
+```
+
+*   **Note:** For local files, the system generates synthetic timestamps starting from the current time, incrementing by 1 second for every second of video duration.
+
+### Real-Time HLS Tracking (Original Demo)
+
+This method requires a specific 3-terminal setup to simulate a "VOD-to-Live" pipeline with ID3 metadata.
+
+#### Requirements
+*   **An HLS VOD Stream Source:** This script is designed to run against the VOD stream generated by the [Org-id3 project](https://github.com/JacobJEdwards/Org-id3).
+
+#### Steps
+
+1.  **Terminal 1 - Host the VOD Stream (Org-id3)**
     ```bash
     cd /path/to/Org-id3/output_hls
-    ```
-2.  Start a basic Python web server.
-    ```bash
     python3 -m http.server 8000
     ```
-3.  Leave this terminal running.
 
-#### Step 2: Terminal 2 - Start This Python Project
-
-This is the main processing script. We start it *before* FFmpeg so it can wait for the stream to begin.
-
-1.  Navigate to this project's directory.
+2.  **Terminal 2 - Start Eagle**
     ```bash
     cd /path/to/Eagle
-    ```
-2.  Run the `main.py` script.
-    ```bash
     python main.py --video_path "live_stream/live.m3u8" --output_dir "output"
     ```
-3.  You will see a small black window pop up, and the terminal will print:
-    `Main: Waiting for video stream at live_stream/live.m3u8...`
+    *It will wait for the stream to start.*
 
-#### Step 3: Terminal 3 - Start the FFmpeg Live Stream
-
-This command pulls from Terminal 1 (VOD) and creates a *new, true live stream* that Terminal 2 (Python) is waiting to consume.
-
-1.  Navigate to this project's directory.
+3.  **Terminal 3 - Start FFmpeg Live Stream**
     ```bash
     cd /path/to/Eagle
-    ```
-2.  Run the FFmpeg VOD-to-Live command. This maps *all* streams (video + data) from the input and re-streams them in real-time.
-    ```bash
     ffmpeg -re \
         -i http://localhost:8000/prog_index.m3u8 \
         -c copy \
@@ -109,30 +127,29 @@ This command pulls from Terminal 1 (VOD) and creates a *new, true live stream* t
         live_stream/live.m3u8
     ```
 
-#### Step 4: Watch and Stop
+4.  **Watch and Stop**
+    *   Two windows will appear: **"Eagle Real-Time Tracking"** and **"Minimap"**.
+    *   Press **'q'** to stop.
 
-* As soon as you run the FFmpeg command, the script in Terminal 2 will detect the stream and begin.
-* Two windows will appear: **"Eagle Real-Time Tracking"** (the main video) and **"Minimap"** (the tactical view).
-* The video will be low-FPS, but the annotations will be perfectly synchronized.
-* To stop, press **'q'** on either OpenCV window. All three threads will shut down gracefully and save the output files.
+---
 
-### Project Outputs
+## Project Outputs
 
-When the script finishes, you will find two files in the `output/` directory:
+When processing finishes, you will find the following files in your specified output directory (or downloadable via the web UI):
 
 1.  `annotated_demo_video.mp4`
-    * A video file of the annotated output you saw on screen.
-    * **Note:** The framerate of this video will match your model's processing speed (e.g., 8.2 FPS), *not* 25 FPS. This is intentional, as it proves the annotations are perfectly synchronized with the frames.
+    *   A video file of the annotated output.
+    *   **Note:** The framerate of this video matches the model's processing speed (e.g., 8-10 FPS), ensuring annotations are synchronized.
 2.  `aggregated_per_second_data.json`
-    * A JSON file containing the per-second aggregated data, formatted according to your specific requirements (Timestamp, Boundaries, Coordinates, etc.).
+    *   A JSON file containing the per-second aggregated data (Timestamp, Boundaries, Coordinates, etc.).
 
 ---
 
 ## Example Use Cases (from Original Eagle Framework)
-The data generated by this pipeline can be used to create a variety of visualisations and metrics. Here are some examples from the original `Eagle` project.
+The data generated by this pipeline can be used to create a variety of visualisations and metrics.
 
 ### Voronoi Diagram 
-Eagle can be used to create Voronoi diagrams of the pitch. This is useful for visualising the movement of players and the areas they occupy on the pitch. The example here is from Manchester City's goal against Nottingham Forest.
+Eagle can be used to create Voronoi diagrams of the pitch.
 
 <table align="center">
  <tr>
@@ -142,7 +159,7 @@ Eagle can be used to create Voronoi diagrams of the pitch. This is useful for vi
 </table>
 
 ### Pass Plot
-Eagle can be used to create pass trajectories. This can be used to create metrics related to the nature of any single pass. The example here is Lamine Yamal's assist during the Euros.
+Eagle can be used to create pass trajectories.
 
 <table align="center">
  <tr>
@@ -153,7 +170,7 @@ during Euros"/></td>
 </table>
 
 ### Player Trajectory
-Eagle can be used to visualize the movement of a player over time. This can be useful for metrics such as distance covered, speed, etc and can also be used to see how players position. The example here is Lionel Messi's goal against Athletic Bilbao.
+Eagle can be used to visualize the movement of a player over time.
 
 <table align="center">
  <tr>
@@ -162,8 +179,3 @@ Eagle can be used to visualize the movement of a player over time. This can be u
 Visualization"/></td>
  </tr>
 </table>
-
-## Local Installation
-If you want to run Eagle locally, first install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-```bash
-curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh) | sh
